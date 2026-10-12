@@ -1,0 +1,6 @@
+{
+  "name": "StickyDesk AI",
+  "description": "AI-powered personal workspace with sticky notes, structured knowledge, task manager, transactions, and Gemini intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
