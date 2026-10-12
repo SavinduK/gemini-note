@@ -10,11 +10,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Locate Gradle project root
+        run: |
+          SETTINGS=$(find . -maxdepth 3 \( -name settings.gradle.kts -o -name settings.gradle \) \
+            -not -path "*/build/*" | head -1)
+          if [ -z "$SETTINGS" ]; then
+            echo "No settings.gradle(.kts) found"; find . -maxdepth 3 | head -50; exit 1
+          fi
+          DIR=$(dirname "$SETTINGS")
+          echo "Project root: $DIR"
+          echo "PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
+          ls -la "$DIR" "$DIR/gradle" || true
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'   # required by AGP 9.1.1
+          java-version: '17'
 
       - name: Set up Android SDK (cmdline-tools)
         env:
@@ -31,43 +43,53 @@ jobs:
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
       - name: Accept SDK licenses
-        run: yes | sdkmanager --licenses || true
+        run: yes | sdkmanager --licenses > /dev/null || true
 
       - name: Install SDK packages
         run: |
-          sdkmanager --update
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-        # ^ adjust android-35 / build-tools version to match your build.gradle's
-        #   compileSdk / buildToolsVersion
+          # compileSdk is 36 with minorApiLevel 1 (API 36.1)
+          sdkmanager "platform-tools" "platforms;android-36" "platforms;android-36.1" "build-tools;36.0.0"
 
-      - name: Allow legacy Kotlin source sets (AGP 9 built-in Kotlin workaround)
+      - name: Allow legacy Kotlin source sets (AGP 9 workaround)
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if ! grep -q "android.disallowKotlinSourceSets" gradle.properties 2>/dev/null; then
             echo "android.disallowKotlinSourceSets=false" >> gradle.properties
           fi
 
-      - name: Pin KSP to match Kotlin version
+      - name: Pin KSP to match Kotlin version (best effort)
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          KOTLIN_VERSION=$(grep -oP '(?<=^kotlin = ")[^"]+' gradle/libs.versions.toml)
-          echo "Detected Kotlin version: $KOTLIN_VERSION"
+          TOML=gradle/libs.versions.toml
+          if [ ! -f "$TOML" ]; then
+            echo "No $TOML; skipping KSP pin"; exit 0
+          fi
+
+          KOTLIN_VERSION=$(grep -oP '^kotlin\s*=\s*"\K[^"]+' "$TOML" | head -1)
+          echo "Detected Kotlin version: ${KOTLIN_VERSION:-none}"
+          if [ -z "$KOTLIN_VERSION" ]; then
+            echo "Kotlin version not found in catalog; skipping KSP pin"; exit 0
+          fi
 
           KSP_VERSION=$(curl -s "https://repo1.maven.org/maven2/com/google/devtools/ksp/com.google.devtools.ksp.gradle.plugin/maven-metadata.xml" \
             | grep -oP "<version>${KOTLIN_VERSION}-[0-9.]+</version>" \
             | sed -E 's/<\/?version>//g' | sort -V | tail -1)
 
           if [ -z "$KSP_VERSION" ]; then
-            echo "No matching KSP release found for Kotlin $KOTLIN_VERSION"
-            exit 1
+            echo "No KSP release matching Kotlin $KOTLIN_VERSION; leaving catalog as is"
+            exit 0
           fi
           echo "Pinning KSP to: $KSP_VERSION"
-          sed -i "s/^googleDevtoolsKsp = \".*\"/googleDevtoolsKsp = \"$KSP_VERSION\"/" gradle/libs.versions.toml
+          sed -i -E "s/^(googleDevtoolsKsp|ksp)\s*=\s*\"[^\"]*\"/\1 = \"$KSP_VERSION\"/" "$TOML"
+          grep -nE '^(kotlin|googleDevtoolsKsp|ksp)\s*=' "$TOML"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.3.1'   # minimum required by AGP 9.1.1
+          gradle-version: '9.3.1'
 
       - name: Generate debug keystore
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ ! -f debug.keystore ]; then
             keytool -genkey -v \
@@ -81,11 +103,24 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
+      - name: Prepare secrets files
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          # Secrets plugin reads .env, falling back to .env.example
+          if [ ! -f .env ] && [ -f .env.example ]; then cp .env.example .env; fi
+
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: '**/build/outputs/apk/**/*.apk'
+          path: ${{ env.PROJECT_DIR }}/**/build/outputs/apk/**/*.apk
