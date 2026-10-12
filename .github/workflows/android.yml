@@ -1,97 +1,62 @@
-name: Android Build
+name: Android CI/CD
+
 on:
   push:
-    branches: [ main ]
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build & Test Android App
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Locate Gradle project root
-        run: |
-          SETTINGS=$(find . -maxdepth 3 \( -name settings.gradle.kts -o -name settings.gradle \) \
-            -not -path "*/build/*" | head -1)
-          if [ -z "$SETTINGS" ]; then
-            echo "No settings.gradle(.kts) found"; find . -maxdepth 3 | head -50; exit 1
-          fi
-          DIR=$(dirname "$SETTINGS")
-          echo "Project root: $DIR"
-          echo "PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
-          ls -la "$DIR" "$DIR/gradle" || true
-
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
-      - name: Set up Android SDK (cmdline-tools)
-        env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android Platform & Build Tools
         run: |
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          curl -o cmdline-tools.zip -sSL \
-            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
-      - name: Accept SDK licenses
-        run: yes | sdkmanager --licenses > /dev/null || true
-
-      - name: Install SDK packages
-        run: |
-          # compileSdk is 36 with minorApiLevel 1 (API 36.1)
-          sdkmanager "platform-tools" "platforms;android-36" "platforms;android-36.1" "build-tools;36.0.0"
-
-      - name: Allow legacy Kotlin source sets (AGP 9 workaround)
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          if ! grep -q "android.disallowKotlinSourceSets" gradle.properties 2>/dev/null; then
-            echo "android.disallowKotlinSourceSets=false" >> gradle.properties
-          fi
-
-      - name: Pin KSP to match Kotlin version (best effort)
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          TOML=gradle/libs.versions.toml
-          if [ ! -f "$TOML" ]; then
-            echo "No $TOML; skipping KSP pin"; exit 0
-          fi
-
-          KOTLIN_VERSION=$(grep -oP '^kotlin\s*=\s*"\K[^"]+' "$TOML" | head -1)
-          echo "Detected Kotlin version: ${KOTLIN_VERSION:-none}"
-          if [ -z "$KOTLIN_VERSION" ]; then
-            echo "Kotlin version not found in catalog; skipping KSP pin"; exit 0
-          fi
-
-          KSP_VERSION=$(curl -s "https://repo1.maven.org/maven2/com/google/devtools/ksp/com.google.devtools.ksp.gradle.plugin/maven-metadata.xml" \
-            | grep -oP "<version>${KOTLIN_VERSION}-[0-9.]+</version>" \
-            | sed -E 's/<\/?version>//g' | sort -V | tail -1)
-
-          if [ -z "$KSP_VERSION" ]; then
-            echo "No KSP release matching Kotlin $KOTLIN_VERSION; leaving catalog as is"
-            exit 0
-          fi
-          echo "Pinning KSP to: $KSP_VERSION"
-          sed -i -E "s/^(googleDevtoolsKsp|ksp)\s*=\s*\"[^\"]*\"/\1 = \"$KSP_VERSION\"/" "$TOML"
-          grep -nE '^(kotlin|googleDevtoolsKsp|ksp)\s*=' "$TOML"
-
-      - name: Set up Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Generate debug keystore
-        working-directory: ${{ env.PROJECT_DIR }}
+      - name: Configure Environment & Secrets
         run: |
-          if [ ! -f debug.keystore ]; then
+          # Secrets Gradle Plugin expects .env file
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          else
+            touch .env
+          fi
+          if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          fi
+
+      - name: Prepare Debug Keystore
+        run: |
+          # Decode committed base64 keystore if available, otherwise generate one
+          if [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f debug.keystore ]; then
             keytool -genkey -v \
               -keystore debug.keystore \
               -storepass android \
@@ -103,24 +68,23 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Prepare secrets files
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          # Secrets plugin reads .env, falling back to .env.example
-          if [ ! -f .env ] && [ -f .env.example ]; then cp .env.example .env; fi
+      - name: Run Unit Tests
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
 
-      - name: Build debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon --stacktrace
-          else
-            gradle assembleDebug --no-daemon --stacktrace
-          fi
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: ${{ env.PROJECT_DIR }}/**/build/outputs/apk/**/*.apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+
+      - name: Upload Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
