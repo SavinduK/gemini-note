@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,33 +12,41 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -50,14 +59,22 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ai.ApiKeyManager
+import com.example.ai.GeminiClient
 import com.example.ai.GeminiModels
+import com.example.ai.KeySource
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +99,14 @@ fun SettingsScreen(
     var importJsonText by remember { mutableStateOf("") }
 
     var modelDropdownExpanded by remember { mutableStateOf(false) }
+
+    // Manual API Key State
+    var manualKeyInput by remember { mutableStateOf(ApiKeyManager.getManualApiKey(context)) }
+    var isKeyVisible by remember { mutableStateOf(false) }
+    var isTestingConnection by remember { mutableStateOf(false) }
+    var connectionTestResult by remember { mutableStateOf<String?>(null) }
+    var isConnectionTestSuccess by remember { mutableStateOf(false) }
+    var keySource by remember { mutableStateOf(ApiKeyManager.getKeySource(context)) }
 
     if (showClearConfirmDialog) {
         AlertDialog(
@@ -207,16 +232,196 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // AI Configuration Section
+            // ==========================================
+            // MANUAL GEMINI API KEY SECTION
+            // ==========================================
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Gemini AI Intelligence", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFFF9C4)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Key, contentDescription = null, tint = Color(0xFFF57F17), modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Gemini API Key", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                        }
+
+                        // Status Badge
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = when (keySource) {
+                                KeySource.MANUAL -> Color(0xFFE8F5E9)
+                                KeySource.BUILD_CONFIG -> Color(0xFFE1F5FE)
+                                KeySource.NONE -> Color(0xFFFFEBEE)
+                            }
+                        ) {
+                            Text(
+                                text = when (keySource) {
+                                    KeySource.MANUAL -> "Custom Key Active"
+                                    KeySource.BUILD_CONFIG -> "AI Studio Secret Active"
+                                    KeySource.NONE -> "Key Missing"
+                                },
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = when (keySource) {
+                                        KeySource.MANUAL -> Color(0xFF2E7D32)
+                                        KeySource.BUILD_CONFIG -> Color(0xFF0277BD)
+                                        KeySource.NONE -> Color(0xFFC62828)
+                                    }
+                                ),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Text(
-                        text = "Select default Gemini model for notes extraction, brainstorming, and chat routing.",
+                        text = "Enter your Google Gemini API key manually below, or configure it via the AI Studio Secrets panel. Get a free API key from Google AI Studio (aistudio.google.com).",
+                        style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // API Key Input Field
+                    OutlinedTextField(
+                        value = manualKeyInput,
+                        onValueChange = {
+                            manualKeyInput = it
+                            connectionTestResult = null
+                        },
+                        label = { Text("Gemini API Key (starts with AIzaSy...)") },
+                        singleLine = true,
+                        visualTransformation = if (isKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { isKeyVisible = !isKeyVisible }) {
+                                Icon(
+                                    if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (isKeyVisible) "Hide Key" else "Show Key"
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("manual_api_key_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Action buttons: Save, Test, Clear
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                ApiKeyManager.setManualApiKey(context, manualKeyInput)
+                                keySource = ApiKeyManager.getKeySource(context)
+                                Toast.makeText(context, "API Key saved successfully!", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = manualKeyInput.isNotBlank(),
+                            modifier = Modifier.weight(1f).testTag("save_manual_api_key_button")
+                        ) {
+                            Text("Save Key")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isTestingConnection = true
+                                    connectionTestResult = null
+                                    val client = GeminiClient(context)
+                                    val result = client.testConnection(manualKeyInput.ifBlank { null })
+                                    isTestingConnection = false
+                                    if (result.isSuccess) {
+                                        isConnectionTestSuccess = true
+                                        connectionTestResult = result.getOrNull() ?: "Success"
+                                    } else {
+                                        isConnectionTestSuccess = false
+                                        connectionTestResult = result.exceptionOrNull()?.message ?: "Failed"
+                                    }
+                                }
+                            },
+                            enabled = !isTestingConnection && (manualKeyInput.isNotBlank() || keySource != KeySource.NONE),
+                            modifier = Modifier.weight(1f).testTag("test_api_connection_button")
+                        ) {
+                            if (isTestingConnection) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text("Test Connection")
+                            }
+                        }
+
+                        if (keySource == KeySource.MANUAL) {
+                            OutlinedButton(
+                                onClick = {
+                                    ApiKeyManager.clearManualApiKey(context)
+                                    manualKeyInput = ""
+                                    keySource = ApiKeyManager.getKeySource(context)
+                                    connectionTestResult = null
+                                    Toast.makeText(context, "Custom API Key cleared", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Text("Clear")
+                            }
+                        }
+                    }
+
+                    // Connection Test Result Banner
+                    if (connectionTestResult != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isConnectionTestSuccess) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (isConnectionTestSuccess) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = if (isConnectionTestSuccess) Color(0xFF2E7D32) else Color(0xFFC62828),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = connectionTestResult!!,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = if (isConnectionTestSuccess) Color(0xFF1B5E20) else Color(0xFFB71C1C),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // AI Model Configuration Section
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Active Gemini Model", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    Text(
+                        text = "Select model for notes extraction, brainstorming, and chat routing.",
                         style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                     )
 
@@ -340,7 +545,7 @@ fun SettingsScreen(
                     Text(
                         text = "• Local Storage: Your notes, checklist tasks, and finances remain stored locally on your device in SQLite.\n" +
                                 "• Gemini API: Only text or images explicitly submitted via chat or AI note extraction are sent to Google Gemini servers.\n" +
-                                "• API Keys: Configured securely via Google AI Studio Secrets panel.\n" +
+                                "• API Keys: Can be entered manually above or configured via AI Studio Secrets.\n" +
                                 "• Offline First: The workspace continues functioning for all manual note-taking, tasks, and calculations even when offline.",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

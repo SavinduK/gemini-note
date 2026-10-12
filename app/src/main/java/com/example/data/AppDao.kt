@@ -33,12 +33,24 @@ interface NoteDao {
 
     @Query("DELETE FROM notes")
     suspend fun deleteAllNotes()
+
+    @Query("SELECT COUNT(*) FROM notes")
+    suspend fun getNotesCount(): Int
 }
 
 @Dao
 interface TaskDao {
     @Query("SELECT * FROM tasks ORDER BY status ASC, dueDate ASC, id DESC")
     fun getAllTasks(): Flow<List<TaskEntity>>
+
+    @Query("SELECT * FROM tasks ORDER BY status ASC, priority DESC, id DESC")
+    fun getAllTasksSync(): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE dueDate >= :startOfDay AND dueDate < :endOfDay ORDER BY status ASC, priority DESC, id DESC")
+    fun getTasksForDaySync(startOfDay: Long, endOfDay: Long): List<TaskEntity>
+
+    @Query("SELECT COUNT(*) FROM tasks")
+    suspend fun getTasksCount(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: TaskEntity): Long
@@ -73,7 +85,7 @@ interface TransactionDao {
 
 @Dao
 interface CategoryDao {
-    @Query("SELECT * FROM categories ORDER BY id ASC")
+    @Query("SELECT * FROM categories GROUP BY LOWER(name) ORDER BY id ASC")
     fun getAllCategories(): Flow<List<CategoryEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

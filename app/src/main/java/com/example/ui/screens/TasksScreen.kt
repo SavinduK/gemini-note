@@ -1,12 +1,14 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,12 +20,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.AlertDialog
@@ -32,10 +34,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,12 +62,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.CategoryEntity
 import com.example.data.TaskEntity
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -86,11 +87,17 @@ fun TasksScreen(
     var selectedTabIndex by remember { mutableIntStateOf(initialTabIndex) }
     var taskToEdit by remember { mutableStateOf<TaskEntity?>(null) }
     var showAddTaskDialog by remember { mutableStateOf(false) }
+    var defaultDueDateForNewTask by remember { mutableStateOf<Long?>(null) }
+
+    // Calendar view specific state
+    val calendarState = remember { Calendar.getInstance() }
+    var displayedYear by remember { mutableIntStateOf(calendarState.get(Calendar.YEAR)) }
+    var displayedMonth by remember { mutableIntStateOf(calendarState.get(Calendar.MONTH)) }
+    var selectedCalendarDateMillis by remember { mutableStateOf(System.currentTimeMillis()) }
 
     val todayStr = remember { SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date()) }
-    val now = System.currentTimeMillis()
 
-    val filteredTasks = remember(tasks, selectedTabIndex) {
+    val filteredTasks = remember(tasks, selectedTabIndex, selectedCalendarDateMillis) {
         when (selectedTabIndex) {
             0 -> { // Upcoming
                 tasks.filter { !it.isCompleted }
@@ -104,8 +111,15 @@ fun TasksScreen(
                     }
                 }
             }
-            2 -> { // Calendar: all sorted by due date
-                tasks.sortedWith(compareBy<TaskEntity> { it.dueDate ?: Long.MAX_VALUE }.thenBy { it.isCompleted })
+            2 -> { // Selected Calendar Date
+                val selectedDayStr = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date(selectedCalendarDateMillis))
+                tasks.filter { task ->
+                    if (task.dueDate == null) false
+                    else {
+                        val taskDateStr = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date(task.dueDate))
+                        taskDateStr == selectedDayStr
+                    }
+                }
             }
             else -> tasks
         }
@@ -129,6 +143,7 @@ fun TasksScreen(
                     IconButton(
                         onClick = {
                             taskToEdit = null
+                            defaultDueDateForNewTask = if (selectedTabIndex == 2) selectedCalendarDateMillis else null
                             showAddTaskDialog = true
                         },
                         modifier = Modifier.testTag("top_bar_add_task_button")
@@ -143,6 +158,7 @@ fun TasksScreen(
             FloatingActionButton(
                 onClick = {
                     taskToEdit = null
+                    defaultDueDateForNewTask = if (selectedTabIndex == 2) selectedCalendarDateMillis else null
                     showAddTaskDialog = true
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -185,47 +201,99 @@ fun TasksScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            if (filteredTasks.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = when (selectedTabIndex) {
-                                1 -> "No tasks due today!"
-                                0 -> "All upcoming tasks completed!"
-                                else -> "No tasks found"
-                            },
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Tap '+' to add a task with due date, priority, and category.",
-                            style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        )
+            if (selectedTabIndex == 2) {
+                // ==========================================
+                // INTERACTIVE MONTHLY CALENDAR VIEW
+                // ==========================================
+                InteractiveCalendarTasksView(
+                    displayedYear = displayedYear,
+                    displayedMonth = displayedMonth,
+                    selectedDateMillis = selectedCalendarDateMillis,
+                    tasks = tasks,
+                    onPrevMonth = {
+                        val cal = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, displayedYear)
+                            set(Calendar.MONTH, displayedMonth)
+                            add(Calendar.MONTH, -1)
+                        }
+                        displayedYear = cal.get(Calendar.YEAR)
+                        displayedMonth = cal.get(Calendar.MONTH)
+                    },
+                    onNextMonth = {
+                        val cal = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, displayedYear)
+                            set(Calendar.MONTH, displayedMonth)
+                            add(Calendar.MONTH, 1)
+                        }
+                        displayedYear = cal.get(Calendar.YEAR)
+                        displayedMonth = cal.get(Calendar.MONTH)
+                    },
+                    onJumpToday = {
+                        val cal = Calendar.getInstance()
+                        displayedYear = cal.get(Calendar.YEAR)
+                        displayedMonth = cal.get(Calendar.MONTH)
+                        selectedCalendarDateMillis = cal.timeInMillis
+                    },
+                    onSelectDate = { dateMillis ->
+                        selectedCalendarDateMillis = dateMillis
+                    },
+                    tasksForSelectedDate = filteredTasks,
+                    onToggleTask = onToggleStatus,
+                    onEditTask = {
+                        taskToEdit = it
+                        showAddTaskDialog = true
+                    },
+                    onDeleteTask = onDeleteTask,
+                    onAddTaskForDate = {
+                        taskToEdit = null
+                        defaultDueDateForNewTask = selectedCalendarDateMillis
+                        showAddTaskDialog = true
                     }
-                }
+                )
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    items(filteredTasks, key = { it.id }) { task ->
-                        TaskItemCard(
-                            task = task,
-                            onToggle = { onToggleStatus(task) },
-                            onEdit = {
-                                taskToEdit = task
-                                showAddTaskDialog = true
-                            },
-                            onDelete = { onDeleteTask(task) }
-                        )
+                // UPCOMING OR TODAY LIST
+                if (filteredTasks.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = when (selectedTabIndex) {
+                                    1 -> "No tasks due today!"
+                                    0 -> "All upcoming tasks completed!"
+                                    else -> "No tasks found"
+                                },
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Tap '+' to add a task with due date, priority, and category.",
+                                style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        items(filteredTasks, key = { it.id }) { task ->
+                            TaskItemCard(
+                                task = task,
+                                onToggle = { onToggleStatus(task) },
+                                onEdit = {
+                                    taskToEdit = task
+                                    showAddTaskDialog = true
+                                },
+                                onDelete = { onDeleteTask(task) }
+                            )
+                        }
                     }
                 }
             }
@@ -236,12 +304,306 @@ fun TasksScreen(
         TaskEditDialog(
             task = taskToEdit,
             categories = categories,
+            defaultDueDate = defaultDueDateForNewTask,
             onDismiss = { showAddTaskDialog = false },
             onSave = { saved ->
                 onSaveTask(saved)
                 showAddTaskDialog = false
             }
         )
+    }
+}
+
+/**
+ * Interactive Monthly Calendar View with highlighted task days
+ */
+@Composable
+fun InteractiveCalendarTasksView(
+    displayedYear: Int,
+    displayedMonth: Int,
+    selectedDateMillis: Long,
+    tasks: List<TaskEntity>,
+    onPrevMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onJumpToday: () -> Unit,
+    onSelectDate: (Long) -> Unit,
+    tasksForSelectedDate: List<TaskEntity>,
+    onToggleTask: (TaskEntity) -> Unit,
+    onEditTask: (TaskEntity) -> Unit,
+    onDeleteTask: (TaskEntity) -> Unit,
+    onAddTaskForDate: () -> Unit
+) {
+    val monthCal = remember(displayedYear, displayedMonth) {
+        Calendar.getInstance().apply {
+            set(Calendar.YEAR, displayedYear)
+            set(Calendar.MONTH, displayedMonth)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }
+    }
+
+    val monthName = remember(monthCal) {
+        SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(monthCal.time)
+    }
+
+    val daysInMonth = remember(monthCal) { monthCal.getActualMaximum(Calendar.DAY_OF_MONTH) }
+    val firstDayOfWeek = remember(monthCal) { monthCal.get(Calendar.DAY_OF_WEEK) } // 1 = Sunday, 2 = Monday...
+
+    val selectedDateStr = remember(selectedDateMillis) {
+        SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date(selectedDateMillis))
+    }
+    val todayDateStr = remember {
+        SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+    }
+
+    // Map each day string "yyyyMMdd" to its tasks
+    val tasksByDay = remember(tasks) {
+        val map = mutableMapOf<String, MutableList<TaskEntity>>()
+        tasks.forEach { t ->
+            if (t.dueDate != null) {
+                val dStr = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date(t.dueDate))
+                map.getOrPut(dStr) { mutableListOf() }.add(t)
+            }
+        }
+        map
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Month Navigation Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                // Header with Prev / Title / Next / Today
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onPrevMonth, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous Month", modifier = Modifier.size(18.dp))
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = monthName,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onJumpToday() }
+                        ) {
+                            Text(
+                                text = "Today",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = onNextMonth, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next Month", modifier = Modifier.size(18.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Day of Week Header Row (Sun, Mon, Tue...)
+                val dayHeaders = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    dayHeaders.forEach { d ->
+                        Text(
+                            text = d,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Days Grid (6 weeks max)
+                val totalSlots = 42
+                val startOffset = firstDayOfWeek - 1 // 0-indexed offset
+
+                for (week in 0 until 6) {
+                    val weekStart = week * 7
+                    if (weekStart - startOffset >= daysInMonth && week > 0) break
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        for (dayCol in 0 until 7) {
+                            val slotIndex = weekStart + dayCol
+                            val dayNumber = slotIndex - startOffset + 1
+
+                            if (dayNumber in 1..daysInMonth) {
+                                val dayCal = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, displayedYear)
+                                    set(Calendar.MONTH, displayedMonth)
+                                    set(Calendar.DAY_OF_MONTH, dayNumber)
+                                    set(Calendar.HOUR_OF_DAY, 12)
+                                }
+                                val dayStr = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(dayCal.time)
+                                val isSelected = dayStr == selectedDateStr
+                                val isToday = dayStr == todayDateStr
+                                val dayTasks = tasksByDay[dayStr] ?: emptyList()
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f)
+                                        .padding(2.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            when {
+                                                isSelected -> MaterialTheme.colorScheme.primary
+                                                dayTasks.isNotEmpty() -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                                else -> Color.Transparent
+                                            }
+                                        )
+                                        .then(
+                                            if (isToday && !isSelected) {
+                                                Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                            } else Modifier
+                                        )
+                                        .clickable {
+                                            onSelectDate(dayCal.timeInMillis)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = "$dayNumber",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
+                                                color = when {
+                                                    isSelected -> MaterialTheme.colorScheme.onPrimary
+                                                    isToday -> MaterialTheme.colorScheme.primary
+                                                    else -> MaterialTheme.colorScheme.onSurface
+                                                },
+                                                fontSize = 12.sp
+                                            )
+                                        )
+
+                                        // Task Indicator Dot or Pill
+                                        if (dayTasks.isNotEmpty()) {
+                                            val hasHigh = dayTasks.any { it.priority == "HIGH" && !it.isCompleted }
+                                            val dotColor = when {
+                                                isSelected -> MaterialTheme.colorScheme.onPrimary
+                                                hasHigh -> Color(0xFFE53935)
+                                                else -> Color(0xFFFB8C00)
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(5.dp)
+                                                    .clip(CircleShape)
+                                                    .background(dotColor)
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // TASKS LIST FOR THE SELECTED CALENDAR DATE
+        // ==========================================
+        val formattedSelectedDate = remember(selectedDateMillis) {
+            SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date(selectedDateMillis))
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = formattedSelectedDate,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = "${tasksForSelectedDate.size} task${if (tasksForSelectedDate.size == 1) "" else "s"} scheduled",
+                    style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                )
+            }
+
+            OutlinedButton(
+                onClick = onAddTaskForDate,
+                modifier = Modifier.height(32.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Add Task", fontSize = 11.sp)
+            }
+        }
+
+        if (tasksForSelectedDate.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "No tasks scheduled for this day.",
+                        style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    TextButton(onClick = onAddTaskForDate) {
+                        Text("+ Add a task for this date")
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                items(tasksForSelectedDate, key = { it.id }) { task ->
+                    TaskItemCard(
+                        task = task,
+                        onToggle = { onToggleTask(task) },
+                        onEdit = { onEditTask(task) },
+                        onDelete = { onDeleteTask(task) }
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -378,6 +740,7 @@ fun TaskItemCard(
 fun TaskEditDialog(
     task: TaskEntity?,
     categories: List<CategoryEntity>,
+    defaultDueDate: Long? = null,
     onDismiss: () -> Unit,
     onSave: (TaskEntity) -> Unit
 ) {
@@ -385,7 +748,7 @@ fun TaskEditDialog(
     var description by remember { mutableStateOf(task?.description ?: "") }
     var priority by remember { mutableStateOf(task?.priority ?: "MEDIUM") }
     var category by remember { mutableStateOf(task?.category ?: "Tasks") }
-    var dueDate by remember { mutableStateOf(task?.dueDate) }
+    var dueDate by remember { mutableStateOf(task?.dueDate ?: defaultDueDate) }
     var dueTime by remember { mutableStateOf(task?.dueTime ?: "") }
     var tags by remember { mutableStateOf(task?.tags ?: "") }
 

@@ -317,8 +317,12 @@ fun AppDrawerContent(
             }
         }
 
-        categories.forEach { cat ->
-            val isCatSelected = currentDestination == NavigationDestination.StickyWall && selectedCategory == cat.name
+        val distinctCategories = remember(categories) {
+            categories.filter { it.name.isNotBlank() }.distinctBy { it.name.trim().lowercase() }
+        }
+
+        distinctCategories.forEach { cat ->
+            val isCatSelected = currentDestination == NavigationDestination.StickyWall && selectedCategory?.equals(cat.name, ignoreCase = true) == true
             val catColor = remember(cat.colorHex) {
                 try {
                     Color(android.graphics.Color.parseColor(cat.colorHex))

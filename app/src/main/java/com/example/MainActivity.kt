@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -35,10 +36,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleIntent(intent)
         setContent {
             StickyDeskTheme {
                 MainAppContent(viewModel = viewModel)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.getStringExtra("destination") == "tasks_today") {
+            viewModel.navigateTo(NavigationDestination.TasksToday)
         }
     }
 }
@@ -75,12 +88,12 @@ fun MainAppContent(viewModel: MainViewModel) {
     val upcomingCount = remember(allTasks) { viewModel.getUpcomingTasksCount(allTasks) }
     val todayCount = remember(allTasks) { viewModel.getTodayTasksCount(allTasks) }
 
-    // Back handling: close drawer first, or return to StickyWall if on secondary screen
-    BackHandler(enabled = drawerState.isOpen || currentDestination != NavigationDestination.StickyWall) {
+    // Back handling: close drawer first, or return to RecentChats (starting screen) if on secondary screen
+    BackHandler(enabled = drawerState.isOpen || currentDestination != NavigationDestination.RecentChats) {
         if (drawerState.isOpen) {
             coroutineScope.launch { drawerState.close() }
-        } else if (currentDestination != NavigationDestination.StickyWall) {
-            viewModel.navigateTo(NavigationDestination.StickyWall)
+        } else if (currentDestination != NavigationDestination.RecentChats) {
+            viewModel.navigateTo(NavigationDestination.RecentChats)
         }
     }
 

@@ -38,7 +38,7 @@ data class ExtractedNoteData(
     val structuredFields: Map<String, String>
 )
 
-class GeminiClient {
+class GeminiClient(private val context: android.content.Context? = null) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -47,9 +47,60 @@ class GeminiClient {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
+    fun getEffectiveApiKey(overrideKey: String? = null): String {
+        if (!overrideKey.isNullOrBlank()) return overrideKey.trim()
+        if (context != null) {
+            val key = ApiKeyManager.getActiveApiKey(context)
+            if (key.isNotBlank()) return key
+        }
+        val buildKey = BuildConfig.GEMINI_API_KEY
+        if (buildKey.isNotBlank() && buildKey != "MY_GEMINI_API_KEY") {
+            return buildKey
+        }
+        return ""
+    }
+
     fun isApiKeyAvailable(): Boolean {
-        val key = BuildConfig.GEMINI_API_KEY
-        return key.isNotBlank() && key != "MY_GEMINI_API_KEY"
+        return getEffectiveApiKey().isNotBlank()
+    }
+
+    suspend fun testConnection(testKey: String? = null): Result<String> = withContext(Dispatchers.IO) {
+        val apiKey = getEffectiveApiKey(testKey)
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(IllegalStateException("No API key provided."))
+        }
+        try {
+            val root = JSONObject()
+            val contentsArr = JSONArray()
+            val turn = JSONObject()
+            turn.put("role", "user")
+            val parts = JSONArray()
+            val part = JSONObject()
+            part.put("text", "Respond with 'Connection successful' only.")
+            parts.put(part)
+            turn.put("parts", parts)
+            contentsArr.put(turn)
+            root.put("contents", contentsArr)
+
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/${GeminiModels.FLASH}:generateContent?key=$apiKey"
+            val requestBody = root.toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder().url(url).post(requestBody).build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    val errorMsg = try {
+                        JSONObject(body).optJSONObject("error")?.optString("message") ?: "HTTP ${response.code}"
+                    } catch (_: Exception) {
+                        "HTTP ${response.code}"
+                    }
+                    return@withContext Result.failure(Exception(errorMsg))
+                }
+                Result.success("Connection verified successfully with Gemini!")
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun generateChatResponse(
@@ -58,10 +109,10 @@ class GeminiClient {
         imageBitmap: Bitmap? = null,
         history: List<Pair<String, String>> = emptyList() // List of (role, content)
     ): Result<String> = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+        val apiKey = getEffectiveApiKey()
+        if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalStateException("GEMINI_API_KEY is not configured. Please add your key in the AI Studio Secrets panel.")
+                IllegalStateException("GEMINI_API_KEY is not configured. Add your key in Settings or AI Studio Secrets.")
             )
         }
 
@@ -161,8 +212,8 @@ class GeminiClient {
         preferredCategory: String = "Auto-detect",
         model: String = GeminiModels.FLASH
     ): Result<ExtractedNoteData> = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+        val apiKey = getEffectiveApiKey()
+        if (apiKey.isBlank()) {
             // Local fallback extraction if API key is missing
             return@withContext Result.success(fallbackLocalExtraction(rawText, preferredCategory))
         }

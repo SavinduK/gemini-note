@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <ImageView
+        android:id="@+id/widget_item_icon"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:src="@drawable/ic_widget_uncheck"
+        android:contentDescription="Status" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginStart="8dp">
+
+        <TextView
+            android:id="@+id/widget_item_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Task Title"
+            android:textColor="#212529"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/widget_item_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Due 14:00 • HIGH"
+            android:textColor="#757575"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_item_priority_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp"
+        android:textSize="9sp"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:text="MED" />
+</LinearLayout>

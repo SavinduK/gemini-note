@@ -43,10 +43,10 @@ sealed class NavigationDestination(val route: String) {
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application, viewModelScope)
     val repository = AppRepository(database)
-    val geminiClient = GeminiClient()
+    val geminiClient = GeminiClient(application)
 
     // Navigation & UI State
-    private val _currentDestination = MutableStateFlow<NavigationDestination>(NavigationDestination.StickyWall)
+    private val _currentDestination = MutableStateFlow<NavigationDestination>(NavigationDestination.RecentChats)
     val currentDestination: StateFlow<NavigationDestination> = _currentDestination.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
@@ -125,6 +125,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val aiErrorMessage: StateFlow<String?> = _aiErrorMessage.asStateFlow()
 
     init {
+        // Ensure sample data exists
+        viewModelScope.launch(Dispatchers.IO) {
+            AppDatabase.ensureInitialData(database)
+            com.example.widget.TodayTasksWidgetProvider.sendUpdateBroadcast(getApplication())
+        }
+
         // Auto-select first chat session if available
         viewModelScope.launch {
             allChatSessions.collect { sessions ->
@@ -197,6 +203,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 repository.updateTask(task)
             }
+            com.example.widget.TodayTasksWidgetProvider.sendUpdateBroadcast(getApplication())
         }
     }
 
@@ -204,12 +211,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val nextStatus = if (task.isCompleted) "PENDING" else "COMPLETED"
             repository.updateTask(task.copy(status = nextStatus))
+            com.example.widget.TodayTasksWidgetProvider.sendUpdateBroadcast(getApplication())
         }
     }
 
     fun deleteTask(task: TaskEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteTask(task)
+            com.example.widget.TodayTasksWidgetProvider.sendUpdateBroadcast(getApplication())
         }
     }
 
@@ -374,6 +383,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Quick AI prompt from Starting Screen
+    fun quickAskAi(prompt: String, onResult: (String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = geminiClient.generateChatResponse(
+                prompt = prompt,
+                model = _selectedAiModel.value
+            )
+            val answer = result.getOrElse { "⚠️ ${it.message ?: "Could not complete request"}" }
+            launch(Dispatchers.Main) {
+                onResult(answer)
+            }
+        }
+    }
+
     // Data management
     suspend fun exportDataJson(): String {
         return repository.exportToJson(
@@ -397,12 +420,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.clearAllData()
             _currentSessionId.value = null
+            com.example.widget.TodayTasksWidgetProvider.sendUpdateBroadcast(getApplication())
         }
     }
 
     fun resetToSampleData() {
         viewModelScope.launch(Dispatchers.IO) {
             repository.resetToDefaultSample()
+            com.example.widget.TodayTasksWidgetProvider.sendUpdateBroadcast(getApplication())
         }
     }
 

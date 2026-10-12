@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">StickyDesk AI</string>
+    <string name="widget_description">Shows your scheduled tasks for today with real-time updates.</string>
 </resources>

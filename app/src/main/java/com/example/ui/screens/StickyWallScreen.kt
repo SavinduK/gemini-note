@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,14 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.StickyNote2
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,6 +48,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ai.ExtractedNoteData
 import com.example.data.CategoryEntity
 import com.example.data.NoteEntity
 import com.example.ui.components.StickyNoteCard
@@ -72,7 +70,7 @@ fun StickyWallScreen(
     onDeleteNote: (NoteEntity) -> Unit,
     onTogglePin: (NoteEntity) -> Unit,
     onToggleArchive: (NoteEntity) -> Unit,
-    onExtractWithAi: (text: String, category: String, onComplete: (com.example.ai.ExtractedNoteData) -> Unit) -> Unit
+    onExtractWithAi: (text: String, category: String, onComplete: (ExtractedNoteData) -> Unit) -> Unit
 ) {
     var noteToEdit by remember { mutableStateOf<NoteEntity?>(null) }
     var showNewNoteDialog by remember { mutableStateOf(false) }
@@ -99,28 +97,16 @@ fun StickyWallScreen(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = if (showArchived) "Archived Notes" else "Sticky Wall",
+                            text = when {
+                                showArchived -> "Archived Notes"
+                                selectedCategory != null -> "Sticky Wall • $selectedCategory"
+                                else -> "Sticky Wall"
+                            },
                             style = MaterialTheme.typography.headlineSmall.copy(
                                 fontWeight = FontWeight.ExtraBold,
                                 letterSpacing = (-0.5).sp
                             )
                         )
-                        if (selectedCategory != null) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer
-                            ) {
-                                Text(
-                                    text = selectedCategory,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
                     }
                 },
                 navigationIcon = {
@@ -181,61 +167,33 @@ fun StickyWallScreen(
                 .padding(innerPadding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Category & Tag filter scrollable chips row
-            val filterList = listOf("All") + listOf("Projects", "Travel", "Tech", "Clinical", "Other") + categories.map { it.name }
-            val distinctCategories = filterList.distinct()
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                distinctCategories.forEach { cat ->
-                    val isSelected = (cat == "All" && selectedCategory == null) || (cat == selectedCategory)
+            // Active tag filter banner if filtered from drawer
+            if (selectedTag != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable {
-                                onCategoryFilterChange(if (cat == "All") null else cat)
-                            }
-                    ) {
-                        Text(
-                            text = cat,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            ),
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-
-                // Active tag badge if selected
-                if (selectedTag != null) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable { onTagFilterChange(null) }
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "#$selectedTag",
+                                text = "Tag: #$selectedTag",
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 Icons.Default.Close,
                                 contentDescription = "Clear tag filter",
@@ -247,9 +205,9 @@ fun StickyWallScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Main Sticky Notes Grid
+            // ==========================================
+            // MAIN STICKY NOTES GRID
+            // ==========================================
             if (filteredNotes.isEmpty()) {
                 Box(
                     modifier = Modifier

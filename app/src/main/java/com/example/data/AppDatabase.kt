@@ -33,30 +33,31 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
-        fun getDatabase(context: Context, scope: CoroutineScope): AppDatabase {
+        fun getDatabase(context: Context, scope: CoroutineScope? = null): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "stickydesk_database"
-                )
-                    .addCallback(DatabaseCallback(scope))
-                    .build()
+                ).build()
                 INSTANCE = instance
+
+                // Immediately ensure initial data is populated if database is empty
+                val targetScope = scope ?: CoroutineScope(Dispatchers.IO)
+                targetScope.launch(Dispatchers.IO) {
+                    ensureInitialData(instance)
+                }
+
                 instance
             }
         }
 
-        private class DatabaseCallback(
-            private val scope: CoroutineScope
-        ) : RoomDatabase.Callback() {
-            override fun onCreate(db: SupportSQLiteDatabase) {
-                super.onCreate(db)
-                INSTANCE?.let { database ->
-                    scope.launch(Dispatchers.IO) {
-                        populateInitialData(database)
-                    }
+        suspend fun ensureInitialData(database: AppDatabase) {
+            try {
+                if (database.noteDao().getNotesCount() == 0) {
+                    populateInitialData(database)
                 }
+            } catch (_: Exception) {
             }
         }
 

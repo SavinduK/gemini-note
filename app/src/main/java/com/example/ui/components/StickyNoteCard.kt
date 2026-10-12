@@ -146,24 +146,6 @@ fun StickyNoteCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Category Pill
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color.Black.copy(alpha = 0.08f),
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = note.category,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = StickyTextSecondary
-                            ),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
                 }
 
                 // 3-dot Context Menu
